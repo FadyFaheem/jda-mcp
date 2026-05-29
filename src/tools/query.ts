@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { assertReadOnly, ReadOnlyViolation } from "../moca/readonly.js";
 import { requireActive } from "./shared.js";
 import { formatResult } from "./shared.js";
-import { errorResult, jsonResult, type ToolResult } from "./result.js";
+import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 function isBracketed(q: string): boolean {
   const t = q.trim();
@@ -28,12 +28,20 @@ export function registerQueryTools(server: McpServer): void {
       inputSchema: {
         query: z.string().describe("MOCA command or [SQL]. Use /*#nolimit*/ to bypass the server row limit."),
         maxRows: z.number().int().positive().optional().describe("Max rows to return (default 500)."),
+        maxChars: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Max characters in the JSON response; rows are trimmed to fit so the result is not rejected for being too large (default ~40000)."
+          ),
         autoWrapSql: z.boolean().optional().describe("Auto-wrap bare SELECT/WITH in [ ] (default true)."),
         autoRetryWithBrackets: z.boolean().optional().describe("Retry wrapped in [ ] on failure (default true)."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ query, maxRows, autoWrapSql, autoRetryWithBrackets }): Promise<ToolResult> => {
+    async ({ query, maxRows, maxChars, autoWrapSql, autoRetryWithBrackets }): Promise<ToolResult> => {
       let active;
       try {
         active = requireActive();
@@ -70,7 +78,7 @@ export function registerQueryTools(server: McpServer): void {
         if (result.status !== 0 && result.columns.length === 0) {
           return errorResult(`MOCA status ${result.status}: ${result.message || "query failed"}`);
         }
-        return jsonResult(formatResult(result, maxRows ?? 500));
+        return jsonResultCapped(formatResult(result, maxRows ?? 500), maxChars);
       } catch (e) {
         return errorResult(`Query failed: ${(e as Error).message}`);
       }

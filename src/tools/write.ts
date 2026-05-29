@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ensureWritePermitted, type Permissions } from "../permissions.js";
 import { requireActive } from "./shared.js";
 import { formatResult } from "./shared.js";
-import { errorResult, jsonResult, type ToolResult } from "./result.js";
+import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 export function registerWriteTools(server: McpServer, perms: Permissions): void {
   const runWrite = async (query: string, opSummary: string, autoCommit: boolean): Promise<ToolResult> => {
@@ -20,7 +20,7 @@ export function registerWriteTools(server: McpServer, perms: Permissions): void 
       if (result.status !== 0 && result.columns.length === 0) {
         return errorResult(`MOCA status ${result.status}: ${result.message || "write failed"}`);
       }
-      return jsonResult({ approvedBy: decision.reason, autoCommit, ...formatResult(result) });
+      return jsonResultCapped({ approvedBy: decision.reason, autoCommit, ...formatResult(result) });
     } catch (e) {
       return errorResult(`Write failed: ${(e as Error).message}`);
     }

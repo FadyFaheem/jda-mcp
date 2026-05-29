@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sqlQuote } from "../moca/util.js";
 import { formatResult, requireActive, runRead } from "./shared.js";
-import { errorResult, jsonResult, type ToolResult } from "./result.js";
+import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 type DbType = "ORACLE" | "MSSQL" | "DB2" | "UNKNOWN";
 
@@ -61,7 +61,7 @@ export function registerSchemaTools(server: McpServer): void {
     },
     async (): Promise<ToolResult> => {
       try {
-        return jsonResult(formatResult(await runRead("sl_get db_info")));
+        return jsonResultCapped(formatResult(await runRead("sl_get db_info")));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -90,7 +90,7 @@ export function registerSchemaTools(server: McpServer): void {
           );
           formatted.returned = formatted.rows.length;
         }
-        return jsonResult(formatted);
+        return jsonResultCapped(formatted);
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -108,7 +108,7 @@ export function registerSchemaTools(server: McpServer): void {
     async ({ tableName }): Promise<ToolResult> => {
       try {
         const res = await runRead(`list table columns where table_name = '${sqlQuote(tableName)}'`);
-        return jsonResult(formatResult(res));
+        return jsonResultCapped(formatResult(res));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -125,7 +125,7 @@ export function registerSchemaTools(server: McpServer): void {
     },
     async ({ maxRows }): Promise<ToolResult> => {
       try {
-        return jsonResult(formatResult(await runRead("list user views"), maxRows ?? 2000));
+        return jsonResultCapped(formatResult(await runRead("list user views"), maxRows ?? 2000));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -143,7 +143,7 @@ export function registerSchemaTools(server: McpServer): void {
     async ({ tableName }): Promise<ToolResult> => {
       try {
         const res = await runRead(`list table indexes where table_name = '${sqlQuote(tableName)}'`);
-        return jsonResult(formatResult(res));
+        return jsonResultCapped(formatResult(res));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -161,7 +161,7 @@ export function registerSchemaTools(server: McpServer): void {
     async ({ columnName }): Promise<ToolResult> => {
       try {
         const res = await runRead(`list tables with column where column_name = '${sqlQuote(columnName)}'`);
-        return jsonResult(formatResult(res));
+        return jsonResultCapped(formatResult(res));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -188,7 +188,7 @@ export function registerSchemaTools(server: McpServer): void {
         }
         let sql = PK_SQL_ORACLE;
         if (tableName) sql = `select * from (${sql}) where table_name = lower('${sqlQuote(tableName)}')`;
-        return jsonResult(formatResult(await runRead(`[${sql}]`)));
+        return jsonResultCapped(formatResult(await runRead(`[${sql}]`)));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -209,7 +209,7 @@ export function registerSchemaTools(server: McpServer): void {
         requireActive();
         const db = await detectDbType();
         if (db === "UNKNOWN") return errorResult("Could not determine database type from 'sl_get db_info'.");
-        return jsonResult(formatResult(await runRead(`[${COLUMN_SQL[db]}]`), maxRows ?? 5000));
+        return jsonResultCapped(formatResult(await runRead(`[${COLUMN_SQL[db]}]`), maxRows ?? 5000));
       } catch (e) {
         return errorResult((e as Error).message);
       }

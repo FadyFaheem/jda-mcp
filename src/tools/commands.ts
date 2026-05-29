@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sqlQuote } from "../moca/util.js";
 import { formatResult, runRead } from "./shared.js";
-import { errorResult, jsonResult, type ToolResult } from "./result.js";
+import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 export function registerCommandTools(server: McpServer): void {
   server.registerTool(
@@ -22,7 +22,7 @@ export function registerCommandTools(server: McpServer): void {
         const query = like
           ? `list active commands where command like '%${sqlQuote(like)}%'`
           : "list active commands";
-        return jsonResult(formatResult(await runRead(query), maxRows ?? 1000));
+        return jsonResultCapped(formatResult(await runRead(query), maxRows ?? 1000));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -39,7 +39,7 @@ export function registerCommandTools(server: McpServer): void {
     },
     async ({ command }): Promise<ToolResult> => {
       try {
-        return jsonResult(formatResult(await runRead(`list active commands where command = '${sqlQuote(command)}'`)));
+        return jsonResultCapped(formatResult(await runRead(`list active commands where command = '${sqlQuote(command)}'`)));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -56,7 +56,7 @@ export function registerCommandTools(server: McpServer): void {
     },
     async ({ command }): Promise<ToolResult> => {
       try {
-        return jsonResult(
+        return jsonResultCapped(
           formatResult(await runRead(`list active command arguments where command = '${sqlQuote(command)}'`))
         );
       } catch (e) {
@@ -75,7 +75,7 @@ export function registerCommandTools(server: McpServer): void {
     },
     async ({ command }): Promise<ToolResult> => {
       try {
-        return jsonResult(
+        return jsonResultCapped(
           formatResult(await runRead(`list active triggers where command = '${sqlQuote(command)}'`))
         );
       } catch (e) {
