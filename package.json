@@ -1,6 +1,6 @@
 {
   "name": "jda-moca-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for MOCA / Blue Yonder (JDA) WMS: connect, run read-only queries, discover schema and commands, with encrypted reusable connection profiles.",
   "type": "module",
   "bin": {

@@ -8,7 +8,7 @@ import { registerWriteTools } from "./tools/write.js";
 import { registerResources } from "./resources/index.js";
 
 export const SERVER_NAME = "jda-moca-mcp";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.2.1";
 
 const INSTRUCTIONS = `MCP server for MOCA / Blue Yonder (JDA) WMS.
 

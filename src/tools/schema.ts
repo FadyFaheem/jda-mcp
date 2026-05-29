@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sqlQuote } from "../moca/util.js";
-import { formatResult, requireActive, runRead } from "./shared.js";
+import { formatList, formatResult, requireActive, runRead } from "./shared.js";
 import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 type DbType = "ORACLE" | "MSSQL" | "DB2" | "UNKNOWN";
@@ -72,25 +72,18 @@ export function registerSchemaTools(server: McpServer): void {
     "list_tables",
     {
       title: "List tables",
-      description: "List user tables (via 'list user tables'). Optional case-insensitive name filter.",
+      description:
+        "List user table names (via 'list user tables') as a compact, sorted name list. Optional case-insensitive substring filter is applied server-side across ALL tables before any size cap.",
       inputSchema: {
         filter: z.string().optional().describe("Only return tables whose name contains this substring."),
-        maxRows: z.number().int().positive().optional(),
+        maxRows: z.number().int().positive().optional().describe("Max names to return (default 5000)."),
       },
       annotations: { readOnlyHint: true },
     },
     async ({ filter, maxRows }): Promise<ToolResult> => {
       try {
         const res = await runRead("list user tables");
-        const formatted = formatResult(res, maxRows ?? 2000);
-        if (filter) {
-          const f = filter.toLowerCase();
-          formatted.rows = formatted.rows.filter((r) =>
-            Object.values(r).some((v) => String(v ?? "").toLowerCase().includes(f))
-          );
-          formatted.returned = formatted.rows.length;
-        }
-        return jsonResultCapped(formatted);
+        return jsonResultCapped(formatList(res, { filter, maxRows }));
       } catch (e) {
         return errorResult((e as Error).message);
       }
@@ -119,13 +112,17 @@ export function registerSchemaTools(server: McpServer): void {
     "list_views",
     {
       title: "List views",
-      description: "List user views (via 'list user views').",
-      inputSchema: { maxRows: z.number().int().positive().optional() },
+      description:
+        "List user view names (via 'list user views') as a compact, sorted name list. Optional case-insensitive substring filter is applied server-side before any size cap.",
+      inputSchema: {
+        filter: z.string().optional().describe("Only return views whose name contains this substring."),
+        maxRows: z.number().int().positive().optional().describe("Max names to return (default 5000)."),
+      },
       annotations: { readOnlyHint: true },
     },
-    async ({ maxRows }): Promise<ToolResult> => {
+    async ({ filter, maxRows }): Promise<ToolResult> => {
       try {
-        return jsonResultCapped(formatResult(await runRead("list user views"), maxRows ?? 2000));
+        return jsonResultCapped(formatList(await runRead("list user views"), { filter, maxRows }));
       } catch (e) {
         return errorResult((e as Error).message);
       }
