@@ -1,0 +1,6 @@
+node_modules/
+build/
+*.log
+# Never commit local connection store / secrets
+connections.json
+.keyfile
