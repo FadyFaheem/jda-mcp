@@ -100,6 +100,9 @@ export class MocaHttpClient implements MocaClient {
       `<moca-request autocommit="true"><environment></environment>` +
       `<query>login user where usr_id = '${sqlQuote(this.userId)}' and usr_pswd = '${sqlQuote(this.password)}'</query>` +
       `</moca-request>`;
+    // Transport/HTTP errors propagate with their real cause (ECONNREFUSED,
+    // timeout, TLS, HTTP status) so callers can distinguish "server
+    // unreachable" from "bad credentials".
     const resp = await this.postXml(loginXml);
     if (!resp) return "";
     let doc: unknown;
@@ -109,7 +112,10 @@ export class MocaHttpClient implements MocaClient {
       return "";
     }
     const statusText = textOf(findFirst(doc, "status")).trim();
-    if (statusText && statusText !== "0") return "";
+    if (statusText && statusText !== "0") {
+      const msg = textOf(findFirst(doc, "message")).trim();
+      throw new Error(msg ? `MOCA login rejected: ${msg}` : `MOCA login rejected (status ${statusText}).`);
+    }
 
     const sid = textOf(findFirst(doc, "session-id")).trim();
     if (sid) return sid;
@@ -135,8 +141,13 @@ export class MocaHttpClient implements MocaClient {
   }
 
   async runQuery(sessionKey: string, queryText: string): Promise<QueryResult> {
-    const resp = await this.postXml(this.buildRequestXml(sessionKey, queryText));
-    if (!resp) return emptyResult(-1, "No response from server");
+    let resp: string;
+    try {
+      resp = await this.postXml(this.buildRequestXml(sessionKey, queryText));
+    } catch (e) {
+      return emptyResult(-1, (e as Error).message);
+    }
+    if (!resp) return emptyResult(-1, "Empty response from server");
     let doc: unknown;
     try {
       doc = parser.parse(resp);
@@ -177,13 +188,14 @@ export class MocaHttpClient implements MocaClient {
     }
   }
 
+  /** POST the request XML. Rejects with a descriptive error on any transport/HTTP failure. */
   private postXml(xml: string): Promise<string> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let u: URL;
       try {
         u = new URL(this.url);
       } catch {
-        resolve("");
+        reject(new Error(`Invalid MOCA service URL: ${this.url}`));
         return;
       }
       const isHttps = u.protocol === "https:";
@@ -207,17 +219,19 @@ export class MocaHttpClient implements MocaClient {
       const req = lib.request(options, (res) => {
         if (res.statusCode !== 200) {
           res.resume();
-          resolve("");
+          reject(new Error(`HTTP ${res.statusCode ?? "?"} from ${u.host} (expected 200 from the MOCA service).`));
           return;
         }
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
       });
-      req.on("error", () => resolve(""));
+      req.on("error", (e: NodeJS.ErrnoException) => {
+        reject(new Error(`${e.code ? `${e.code}: ` : ""}${e.message} (POST ${u.host})`));
+      });
       req.on("timeout", () => {
-        req.destroy();
-        resolve("");
+        // destroy(err) re-emits as 'error', which rejects with this message.
+        req.destroy(new Error(`Timed out after ${this.timeoutSeconds}s waiting for ${u.host}.`));
       });
       req.write(body);
       req.end();

@@ -179,14 +179,15 @@ class MocaTcpConnection {
     private readonly timeoutMs: number
   ) {}
 
-  async connect(): Promise<boolean> {
+  /** Open the socket; returns null on success or the underlying error. */
+  async connect(): Promise<Error | null> {
     this.close();
     try {
       const raw = await connectSocket(this.host, this.port, this.timeoutMs);
       this.socket = new MocaSocket(raw);
-      return true;
-    } catch {
-      return false;
+      return null;
+    } catch (e) {
+      return e as Error;
     }
   }
 
@@ -400,22 +401,31 @@ export class MocaTcpClient implements MocaClient {
 
   async login(): Promise<string> {
     const conn = new MocaTcpConnection(this.host, this.port, this.timeoutSeconds * 1000);
-    if (!(await conn.connect())) return "";
+    const connectErr = await conn.connect();
+    if (connectErr) {
+      throw new Error(`TCP connect to ${this.host}:${this.port} failed: ${connectErr.message}`);
+    }
     if (!(await conn.handshake())) {
       conn.close();
-      return "";
+      throw new Error(
+        `MOCA handshake with ${this.host}:${this.port} failed (is this a MOCA TCP service port?).`
+      );
     }
     const loginCmd = `login user where usr_id = '${sqlQuote(this.userId)}' and usr_pswd = '${sqlQuote(this.password)}'`;
     const env = `USR_ID=${this.userId}`;
     const raw = await conn.sendCommand(loginCmd, env, true);
     if (raw === null) {
       conn.close();
-      return "";
+      throw new Error(`No response to login from ${this.host}:${this.port} (connection dropped).`);
     }
     const parsed = conn.parseResponse(raw);
     if (parsed.status !== 0) {
       conn.close();
-      return "";
+      throw new Error(
+        parsed.message
+          ? `MOCA login rejected: ${parsed.message}`
+          : `MOCA login rejected (status ${parsed.status}).`
+      );
     }
     const skIdx = parsed.columns.indexOf("session_key");
     if (skIdx >= 0 && parsed.rows.length > 0 && skIdx < parsed.rows[0].length) {
@@ -427,7 +437,13 @@ export class MocaTcpClient implements MocaClient {
 
   async runQuery(_sessionKey: string, queryText: string, autoCommit = true): Promise<QueryResult> {
     if (!this.conn || !this.conn.socket) {
-      return { status: -1, message: "Not connected", columns: [], colTypes: [], rows: [] };
+      return {
+        status: -1,
+        message: "Not connected (TCP session closed or dropped).",
+        columns: [],
+        colTypes: [],
+        rows: [],
+      };
     }
     const sk = this.conn.sessionKey || "";
     const envPairs = [`USR_ID=${this.userId}`, `SESSION_KEY=${sk}`];
@@ -436,7 +452,13 @@ export class MocaTcpClient implements MocaClient {
 
     const raw = await this.conn.sendCommand(queryText, env, autoCommit);
     if (raw === null) {
-      return { status: -1, message: "No response", columns: [], colTypes: [], rows: [] };
+      return {
+        status: -1,
+        message: "No response (TCP connection dropped mid-request).",
+        columns: [],
+        colTypes: [],
+        rows: [],
+      };
     }
     const parsed = this.conn.parseResponse(raw);
     if (parsed.status !== 0 && parsed.columns.length === 0) {

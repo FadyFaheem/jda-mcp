@@ -13,10 +13,19 @@ per-operation human approval (MCP elicitation) or an explicit `--allow-write` fl
   Windows DPAPI (CurrentUser), with an AES fallback for non-Windows dev.
 - **Machine-based discovery**: `discover_connections` reads this machine's MOCA client configuration
   (Windows registry `SOFTWARE\Mchugh\Client` and the RedPrairie `DLXClientConfig.xml`).
-- **Read-only by default**: a guard blocks mutating verbs and unsafe operations.
+- **Read-only by default**: a guard blocks mutating verbs and unsafe operations — including
+  multi-statement bracket SQL, CTE-smuggled DML (`with ... delete`), `select ... into`,
+  `exec`/`call`/PL-SQL blocks, and statements hidden behind `--` comments or string literals.
+- **Structured tool output**: query/schema/command tools declare MCP `outputSchema` and return
+  `structuredContent`, so clients can consume results without re-parsing text.
+- **Large-result ergonomics**: page with `offset`+`maxRows`, and `rowFormat: "arrays"` returns
+  positional rows (far fewer tokens than rows-of-objects) so more data fits per response.
+- **Self-healing sessions**: read queries auto re-login and retry once after a dropped socket or
+  expired MOCA session; writes never auto-retry (no double execution).
 - **Schema + command discovery**: tables, columns, indexes, primary keys, descriptions, and the full
   MOCA command repository (with syntax/arguments/triggers).
-- **Self-documenting**: ships markdown reference resources (`resource://moca_*`).
+- **Self-documenting**: ships markdown reference resources (`resource://moca_*`) and guided MCP
+  prompts (`moca_connect`, `explore_table`, `moca_query_help`).
 
 ## Build
 
@@ -77,11 +86,20 @@ for approval in clients that support MCP elicitation (e.g. Cursor 1.5+).
 - **Connections**: `list_connections`, `get_connection`, `create_connection`, `update_connection`,
   `delete_connection`, `test_connection`, `connect`, `disconnect`, `get_session_status`,
   `discover_connections`, `import_connections`.
-- **Query**: `run_moca_query` (read-only; auto-wraps bare SQL in `[ ]`).
+- **Query**: `run_moca_query` (read-only; auto-wraps bare SQL in `[ ]`; supports `offset` paging
+  and `rowFormat: "arrays"` for token-efficient large results).
 - **Schema**: `get_database_info`, `list_tables`, `describe_table`, `list_views`, `list_indexes`,
   `find_tables_with_column`, `list_primary_keys`, `list_table_columns_bulk`.
 - **Commands**: `list_commands`, `lookup_command`, `describe_command`, `list_triggers`.
 - **Writes (gated)**: `run_moca_write`, `update_rows`, `delete_rows`.
+
+## Prompts
+
+Guided workflows exposed as MCP prompts (slash commands in most clients):
+
+- `moca_connect` - discover/pick a server and open a session.
+- `explore_table` - structure, keys, sample rows and a summary for one table.
+- `moca_query_help` - compose and run a read-only query for a stated goal.
 
 ## Security
 
@@ -102,7 +120,8 @@ Lists tools/resources and exercises a few no-connection tools against the built 
 ```
 src/
   index.ts            entry (stdio, arg parsing)
-  server.ts           builds the McpServer, registers tools + resources
+  server.ts           builds the McpServer, registers tools + resources + prompts
+  prompts.ts          guided workflow prompts
   permissions.ts      --allow-write + per-operation elicitation gate
   session.ts          active session state
   moca/               types, util, value coercion, HTTP + TCP clients, read-only guard, factory

@@ -6,9 +6,10 @@ import { registerSchemaTools } from "./tools/schema.js";
 import { registerCommandTools } from "./tools/commands.js";
 import { registerWriteTools } from "./tools/write.js";
 import { registerResources } from "./resources/index.js";
+import { registerPrompts } from "./prompts.js";
 
 export const SERVER_NAME = "jda-moca-mcp";
-export const SERVER_VERSION = "0.2.1";
+export const SERVER_VERSION = "0.3.0";
 
 const INSTRUCTIONS = `MCP server for MOCA / Blue Yonder (JDA) WMS.
 
@@ -18,9 +19,15 @@ Workflow:
 3. Explore: 'get_database_info', 'list_tables', 'describe_table', 'find_tables_with_column', 'list_commands'.
 4. Query with 'run_moca_query' (read-only; raw SQL is auto-wrapped in [ ]).
 
+Query/schema tools return structured content alongside the JSON text. For large results, page with
+'offset' + 'maxRows' (watch 'truncated'/'rowCount') and pass rowFormat:'arrays' to fit far more rows
+per response. Read sessions self-heal: a dropped socket or expired MOCA session triggers one automatic
+re-login and retry.
+
 Reads are unrestricted; writes (run_moca_write / update_rows / delete_rows) are DISABLED by default and require
 per-operation approval (elicitation) or starting the server with --allow-write.
 
+Prompts 'moca_connect', 'explore_table' and 'moca_query_help' provide guided workflows.
 See the resource 'resource://moca_server_overview' and the other moca_* resources for full guidance.`;
 
 export function buildServer(perms: Permissions): McpServer {
@@ -35,6 +42,7 @@ export function buildServer(perms: Permissions): McpServer {
   registerCommandTools(server);
   registerWriteTools(server, perms);
   registerResources(server);
+  registerPrompts(server);
 
   return server;
 }

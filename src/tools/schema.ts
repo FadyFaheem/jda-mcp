@@ -1,7 +1,14 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sqlQuote } from "../moca/util.js";
-import { formatList, formatResult, requireActive, runRead } from "./shared.js";
+import {
+  formatList,
+  formatResult,
+  formattedResultShape,
+  listResultShape,
+  requireActive,
+  runRead,
+} from "./shared.js";
 import { errorResult, jsonResultCapped, type ToolResult } from "./result.js";
 
 type DbType = "ORACLE" | "MSSQL" | "DB2" | "UNKNOWN";
@@ -57,6 +64,7 @@ export function registerSchemaTools(server: McpServer): void {
       title: "Database info",
       description: "Get database type/name/schema/version via 'sl_get db_info'.",
       inputSchema: {},
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async (): Promise<ToolResult> => {
@@ -78,6 +86,7 @@ export function registerSchemaTools(server: McpServer): void {
         filter: z.string().optional().describe("Only return tables whose name contains this substring."),
         maxRows: z.number().int().positive().optional().describe("Max names to return (default 5000)."),
       },
+      outputSchema: listResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ filter, maxRows }): Promise<ToolResult> => {
@@ -96,6 +105,7 @@ export function registerSchemaTools(server: McpServer): void {
       title: "Describe table",
       description: "List a table's columns, short names and comments (via 'list table columns').",
       inputSchema: { tableName: z.string().describe("Table name, e.g. 'pckwrk'.") },
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ tableName }): Promise<ToolResult> => {
@@ -118,6 +128,7 @@ export function registerSchemaTools(server: McpServer): void {
         filter: z.string().optional().describe("Only return views whose name contains this substring."),
         maxRows: z.number().int().positive().optional().describe("Max names to return (default 5000)."),
       },
+      outputSchema: listResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ filter, maxRows }): Promise<ToolResult> => {
@@ -134,7 +145,8 @@ export function registerSchemaTools(server: McpServer): void {
     {
       title: "List indexes",
       description: "List indexes for a table (via 'list table indexes').",
-      inputSchema: { tableName: z.string() },
+      inputSchema: { tableName: z.string().describe("Table name, e.g. 'invlod'.") },
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ tableName }): Promise<ToolResult> => {
@@ -152,7 +164,8 @@ export function registerSchemaTools(server: McpServer): void {
     {
       title: "Find tables with column",
       description: "Find all tables that contain a given column (via 'list tables with column').",
-      inputSchema: { columnName: z.string() },
+      inputSchema: { columnName: z.string().describe("Column name, e.g. 'lodnum'.") },
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ columnName }): Promise<ToolResult> => {
@@ -171,7 +184,8 @@ export function registerSchemaTools(server: McpServer): void {
       title: "List primary keys",
       description:
         "List primary-key columns. Oracle uses the data dictionary; for MSSQL/DB2 use 'list_indexes' (the unique/primary index).",
-      inputSchema: { tableName: z.string().optional() },
+      inputSchema: { tableName: z.string().optional().describe("Restrict to one table (default: all tables).") },
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ tableName }): Promise<ToolResult> => {
@@ -198,7 +212,8 @@ export function registerSchemaTools(server: McpServer): void {
       title: "List all columns (bulk)",
       description:
         "Bulk column catalog across all tables using dbtype-aware SQL (Oracle/MSSQL/DB2). Large; capped by maxRows.",
-      inputSchema: { maxRows: z.number().int().positive().optional() },
+      inputSchema: { maxRows: z.number().int().positive().optional().describe("Max rows to return (default 5000).") },
+      outputSchema: formattedResultShape,
       annotations: { readOnlyHint: true },
     },
     async ({ maxRows }): Promise<ToolResult> => {
@@ -206,7 +221,7 @@ export function registerSchemaTools(server: McpServer): void {
         requireActive();
         const db = await detectDbType();
         if (db === "UNKNOWN") return errorResult("Could not determine database type from 'sl_get db_info'.");
-        return jsonResultCapped(formatResult(await runRead(`[${COLUMN_SQL[db]}]`), maxRows ?? 5000));
+        return jsonResultCapped(formatResult(await runRead(`[${COLUMN_SQL[db]}]`), { maxRows: maxRows ?? 5000 }));
       } catch (e) {
         return errorResult((e as Error).message);
       }

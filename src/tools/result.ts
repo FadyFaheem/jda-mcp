@@ -1,6 +1,8 @@
 export interface ToolResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
+  /** MCP structured tool output: clients can consume this without re-parsing the text. */
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 
@@ -8,8 +10,18 @@ export function textResult(text: string): ToolResult {
   return { content: [{ type: "text", text }] };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Attach the value as MCP structuredContent when it is a plain object. */
+function withStructured(result: ToolResult, value: unknown): ToolResult {
+  if (isPlainObject(value)) result.structuredContent = value;
+  return result;
+}
+
 export function jsonResult(value: unknown): ToolResult {
-  return textResult(JSON.stringify(value, null, 2));
+  return withStructured(textResult(JSON.stringify(value, null, 2)), value);
 }
 
 export function errorResult(message: string): ToolResult {
@@ -65,8 +77,30 @@ function withTrimmed(
     note:
       `Output truncated to ${keep} of ${all.length} ${unit} to stay under the response size ` +
       `limit (~${maxChars} chars). Narrow the result (use the 'filter' argument or a WHERE ` +
-      `clause, or select fewer columns), lower maxRows, or page through the results.`,
+      `clause, or select fewer columns), lower maxRows, page with 'offset', or use ` +
+      `rowFormat: 'arrays' to fit more rows per response.`,
   };
+}
+
+/**
+ * Last-resort shape-preserving fallback: empty the trimmable arrays and clip any
+ * oversized string fields. Keeps the object valid against the tool's declared
+ * output schema so structuredContent can always be returned.
+ */
+function clippedFallback(bag: RowBag, maxChars: number): RowBag {
+  const out: RowBag = { ...bag };
+  for (const k of TRIMMABLE_KEYS) {
+    if (Array.isArray(out[k])) out[k] = [];
+  }
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === "string" && v.length > 2000) out[k] = `${v.slice(0, 2000)} ...`;
+  }
+  out.returned = 0;
+  out.truncated = true;
+  out.note =
+    `Result was too large to return (over ~${maxChars} chars) even after trimming. ` +
+    `Narrow the result (filter/WHERE, fewer columns) and retry.`;
+  return out;
 }
 
 /**
@@ -78,7 +112,7 @@ function withTrimmed(
  */
 export function jsonResultCapped(value: unknown, maxChars: number = DEFAULT_MAX_RESULT_CHARS): ToolResult {
   let json = JSON.stringify(value, null, 2);
-  if (json.length <= maxChars) return textResult(json);
+  if (json.length <= maxChars) return withStructured(textResult(json), value);
 
   const bag = value as RowBag;
   const key = trimmableKey(bag);
@@ -98,8 +132,15 @@ export function jsonResultCapped(value: unknown, maxChars: number = DEFAULT_MAX_
         hi = mid - 1;
       }
     }
-    json = JSON.stringify(withTrimmed(bag, key, all, best, maxChars), null, 2);
-    if (json.length <= maxChars) return textResult(json);
+    const trimmed = withTrimmed(bag, key, all, best, maxChars);
+    json = JSON.stringify(trimmed, null, 2);
+    if (json.length <= maxChars) return withStructured(textResult(json), trimmed);
+  }
+
+  if (isPlainObject(value)) {
+    const clipped = clippedFallback(value as RowBag, maxChars);
+    json = JSON.stringify(clipped, null, 2);
+    if (json.length <= maxChars) return withStructured(textResult(json), clipped);
   }
 
   const marker = "\n\n... output truncated to fit the response size limit ...";

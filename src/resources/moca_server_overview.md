@@ -31,7 +31,8 @@ connection profiles. Writes are disabled by default and require explicit approva
 - `import_connections` - import discovered servers into the local store.
 
 ### Query (read-only)
-- `run_moca_query` - run MOCA / `[SQL]`; mutating verbs are blocked here.
+- `run_moca_query` - run MOCA / `[SQL]`; mutating verbs are blocked here. Page big results with
+  `offset` + `maxRows`, and use `rowFormat: 'arrays'` to fit far more rows per response.
 
 ### Schema discovery
 - `get_database_info`, `list_tables`, `describe_table`, `list_views`, `list_indexes`,
@@ -45,7 +46,16 @@ connection profiles. Writes are disabled by default and require explicit approva
   elicitation) or starting the server with `--allow-write`. The AI can request, but cannot
   self-grant.
 
+## Prompts
+- `moca_connect` - discover/pick a server and open a session.
+- `explore_table` - structure, keys, sample rows and a summary for one table.
+- `moca_query_help` - compose and run a read-only query for a stated goal.
+
 ## Safety model
 - Reads pass a read-only guard that blocks mutating MOCA verbs and unsafe operations
-  (`commit`, `truncate`, `alter system/session`, `execute os command`).
+  (`commit`, `truncate`, `alter system/session`, `execute os command`), every statement in a
+  bracket-SQL block (multi-statement, CTE-smuggled DML, `select into`, `exec`/`call`/PL-SQL),
+  with string literals and `--` comments neutralized before scanning.
 - Writes are gated; `--allow-write` pre-approves them for trusted setups.
+- Read sessions self-heal: one automatic re-login + retry after a dropped socket or expired
+  session. Writes never auto-retry.

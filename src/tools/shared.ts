@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getActive } from "../session.js";
 import type { MocaCell, QueryResult } from "../moca/types.js";
 
@@ -11,43 +12,135 @@ export function requireActive() {
   return active;
 }
 
-/** Run a read query against the active session (no autocommit). */
-export async function runRead(query: string): Promise<QueryResult> {
+/** MOCA error messages that indicate the session itself died (expired/invalid/not authenticated). */
+const SESSION_ERROR_RE =
+  /session.{0,30}(expir|invalid|not\s+found)|not\s+(logged\s+in|authenticated)|re-?authenticat/i;
+
+export interface RunOptions {
+  autoCommit?: boolean;
+  /**
+   * Re-login and retry ONCE on transport (status -1) or session-expiry failures.
+   * Default true; writes must pass false (a lost response could mean the write
+   * already applied, so re-running risks double execution).
+   */
+  retryTransient?: boolean;
+}
+
+/**
+ * Run a query on the active session. With retryTransient (the default for
+ * reads), a dropped socket or expired MOCA session triggers one re-login and
+ * retry, so long-lived MCP sessions self-heal instead of failing until the
+ * user manually reconnects.
+ */
+export async function runOnActive(query: string, opts: RunOptions = {}): Promise<QueryResult> {
+  const { autoCommit = false, retryTransient = true } = opts;
   const active = requireActive();
-  return active.client.runQuery(active.sessionKey, query, false);
+  let result: QueryResult;
+  try {
+    result = await active.client.runQuery(active.sessionKey, query, autoCommit);
+  } catch (e) {
+    if (!retryTransient) throw e;
+    result = { status: -1, message: (e as Error).message, columns: [], colTypes: [], rows: [] };
+  }
+  if (!retryTransient) return result;
+
+  const failed = result.status !== 0 && result.columns.length === 0;
+  if (!failed) return result;
+  const transient = result.status === -1 || SESSION_ERROR_RE.test(result.message);
+  if (!transient) return result;
+
+  try {
+    const key = await active.client.login();
+    if (!key) return result;
+    active.sessionKey = key;
+    return await active.client.runQuery(key, query, autoCommit);
+  } catch {
+    return result;
+  }
+}
+
+/** Run a read query against the active session (no autocommit; self-heals the session). */
+export async function runRead(query: string): Promise<QueryResult> {
+  return runOnActive(query);
+}
+
+export type RowFormat = "objects" | "arrays";
+
+export interface FormatOptions {
+  /** Max rows to return after offset (default 500). */
+  maxRows?: number;
+  /** Rows to skip before returning (client-side paging; default 0). */
+  offset?: number;
+  /** 'objects' (default): rows keyed by column. 'arrays': positional arrays (token-efficient). */
+  rowFormat?: RowFormat;
 }
 
 export interface FormattedResult {
   status: number;
   rowCount: number;
+  offset: number;
   returned: number;
   truncated: boolean;
   columns: string[];
-  rows: Record<string, unknown>[];
+  rows: Record<string, MocaCell>[] | MocaCell[][];
   message?: string;
 }
 
-export function formatResult(result: QueryResult, maxRows = 500): FormattedResult {
-  const truncated = result.rows.length > maxRows;
-  const slice = truncated ? result.rows.slice(0, maxRows) : result.rows;
-  const rows = slice.map((row) => {
-    const obj: Record<string, unknown> = {};
-    result.columns.forEach((col, i) => {
-      obj[col] = row[i];
-    });
-    return obj;
-  });
+export function formatResult(result: QueryResult, opts: FormatOptions = {}): FormattedResult {
+  const maxRows = opts.maxRows ?? 500;
+  const offset = Math.max(0, opts.offset ?? 0);
+  const slice = result.rows.slice(offset, offset + maxRows);
+  const rows =
+    opts.rowFormat === "arrays"
+      ? slice
+      : slice.map((row) => {
+          const obj: Record<string, MocaCell> = {};
+          result.columns.forEach((col, i) => {
+            obj[col] = row[i] ?? null;
+          });
+          return obj;
+        });
   const out: FormattedResult = {
     status: result.status,
     rowCount: result.rows.length,
-    returned: rows.length,
-    truncated,
+    offset,
+    returned: slice.length,
+    truncated: offset + slice.length < result.rows.length,
     columns: result.columns,
     rows,
   };
   if (result.message) out.message = result.message;
   return out;
 }
+
+const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/** MCP outputSchema shape for tools that return a formatResult-style table. */
+export const formattedResultShape = {
+  status: z.number().describe("MOCA status code (0 = success)."),
+  rowCount: z.number().describe("Total rows in the fetched result set."),
+  offset: z.number().describe("Rows skipped before the first returned row."),
+  returned: z.number().describe("Rows returned in this response."),
+  truncated: z.boolean().describe("True when more rows exist beyond this page / size cap."),
+  columns: z.array(z.string()),
+  rows: z
+    .array(z.union([z.record(cellSchema), z.array(cellSchema)]))
+    .describe("Rows as objects keyed by column (default) or positional arrays (rowFormat: 'arrays')."),
+  message: z.string().optional(),
+  note: z.string().optional().describe("Present when the result was trimmed to fit the size limit."),
+};
+
+/** MCP outputSchema shape for tools that return a compact name list. */
+export const listResultShape = {
+  status: z.number().describe("MOCA status code (0 = success)."),
+  count: z.number().describe("Total values after filtering (before any size-cap trimming)."),
+  returned: z.number(),
+  truncated: z.boolean(),
+  column: z.string().describe("Source column the values were taken from."),
+  values: z.array(cellSchema),
+  message: z.string().optional(),
+  note: z.string().optional().describe("Present when the result was trimmed to fit the size limit."),
+};
 
 export interface ListResult {
   status: number;
