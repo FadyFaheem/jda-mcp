@@ -9,7 +9,13 @@ function check(label, ok, detail = "") {
   if (!ok) failures++;
 }
 
-const transport = new StdioClientTransport({ command: "node", args: ["build/index.js"] });
+// Pass the full environment through to the child so c8's NODE_V8_COVERAGE reaches
+// the spawned server (the MCP stdio transport otherwise filters env vars).
+const transport = new StdioClientTransport({
+  command: "node",
+  args: ["build/index.js"],
+  env: process.env,
+});
 const client = new Client({ name: "smoke", version: "1.0.0" });
 await client.connect(transport);
 

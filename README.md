@@ -1,5 +1,8 @@
 # JDA / Blue Yonder MOCA MCP Server
 
+[![CI](https://github.com/FadyFaheem/jda-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/FadyFaheem/jda-mcp/actions/workflows/ci.yml)
+[![Release](https://github.com/FadyFaheem/jda-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/FadyFaheem/jda-mcp/actions/workflows/release.yml)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server that lets any MCP-capable AI
 (Cursor, Claude Desktop, VS Code) connect to **MOCA** servers (Blue Yonder / JDA / RedPrairie WMS),
 run **read-only** queries, discover **schema** and the **MOCA command API**, and manage **encrypted,
@@ -110,10 +113,47 @@ Guided workflows exposed as MCP prompts (slash commands in most clients):
 ## Quick smoke test
 
 ```bash
-node scripts/smoke.mjs
+npm run build
+npm run smoke      # or: npm test
 ```
 
-Lists tools/resources and exercises a few no-connection tools against the built server.
+Lists tools/resources and exercises a few no-connection tools against the built server (including
+the read-only guard). The smoke test spawns the built server over stdio and asserts on its behavior.
+
+## Coverage
+
+```bash
+npm run coverage
+```
+
+Runs the smoke test under [c8](https://github.com/bcoe/c8). Because the smoke test runs the server in
+a child process, the script passes `NODE_V8_COVERAGE` through to that subprocess so its execution is
+included. Source maps are emitted by `tsc`, so the report maps back to the original `src/*.ts` files.
+Outputs land in `coverage/`: a terminal summary, `lcov.info`, `coverage-summary.json`, and a browsable
+HTML report at `coverage/lcov-report/index.html`.
+
+## Continuous integration & releases
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+- **CI** (`ci.yml`) - on every push/PR to `main` (and manual dispatch): installs, builds, runs the
+  smoke test, and produces coverage on Node 18/20/22 (Linux) plus Node 20 on Windows (the real target
+  platform / DPAPI path). A coverage summary is added to the run summary, and the full HTML report is
+  uploaded as the `coverage-report` artifact.
+- **Release** (`release.yml`) - on pushing a `v*` tag (or manual dispatch with a tag): builds, runs the
+  smoke test as a gate, then publishes a **GitHub Release** with auto-generated notes and two assets -
+  the npm tarball (`npm pack`) and a `*-build.zip` of the compiled output.
+
+Cut a release by pushing a tag:
+
+```bash
+git tag v3.0
+git push origin v3.0
+```
+
+> To also publish to npm on release, add a step that runs `npm publish` with an `NPM_TOKEN` secret and
+> `registry-url` configured in `actions/setup-node`. It is intentionally left out so releases stay
+> GitHub-only by default.
 
 ## Project layout
 
@@ -129,6 +169,10 @@ src/
   tools/              connections, query, schema, commands, write
   resources/          loader + moca_*.md reference docs
 scripts/
-  copy-resources.mjs  build step (copies *.md to build/resources)
-  smoke.mjs           stdio smoke test
+  copy-resources.mjs    build step (copies *.md to build/resources)
+  smoke.mjs             stdio smoke test
+  coverage-summary.mjs  renders coverage totals into the CI job summary
+.github/workflows/
+  ci.yml                build + smoke + coverage on push/PR
+  release.yml           build + smoke gate + GitHub Release on v* tags
 ```

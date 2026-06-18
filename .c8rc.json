@@ -1,0 +1,14 @@
+{
+  "all": true,
+  "include": ["build/**/*.js"],
+  "exclude": [
+    "build/**/*.map",
+    "build/index.js",
+    "scripts/**",
+    "coverage/**",
+    "node_modules/**"
+  ],
+  "reporter": ["text", "text-summary", "lcov", "json-summary"],
+  "reports-dir": "coverage",
+  "clean": true
+}
